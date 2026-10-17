@@ -3,7 +3,8 @@
 # The release zip ships them next to the executable, so the export needs no setup.
 #
 #   liboodle-data-shared.so  Oodle decompression (OodleUE release, same as CUE4Parse)
-#   libSkiaSharp.so          PNG encoding (SkiaSharp.NativeAssets.Linux, same version as the project)
+#   libSkiaSharp.so          PNG encoding (SkiaSharp.NativeAssets.Linux.NoDependencies, same version as
+#                            the project; the NoDependencies build needs no system fontconfig/freetype/png)
 #   libdetex.so              BC texture decoding (built from hglm/detex; CUE4Parse ships only a Windows build)
 #
 # Usage: scripts/fetch-linux-natives.sh <output-dir>
@@ -15,7 +16,7 @@ OUT_DIR="${1:?usage: $0 <output-dir>}"
 OODLE_RELEASE="2026-06-04-1357"
 OODLE_ZIP_SHA256="458c66945ea6124d4f6fcf64cec5601ab230f61f6677a6ecab6cca621a9d0e11"
 SKIASHARP_VERSION="3.119.1"
-SKIASHARP_NUPKG_SHA256="4d363a6f114f936ec964a79f8af6fe37f9347930064e5983472851bd9e068e67"
+SKIASHARP_NUPKG_SHA256="4a9ad38720294e16c3a1e4e7fc969a4bb4ca766f5290ca153bc57c1ee0b2a692"
 DETEX_REPO="https://github.com/hglm/detex.git"
 DETEX_COMMIT="cab11584d9be140602a66fd9a88ef0b99f08a97a"
 
@@ -45,7 +46,7 @@ unzip -q -o -j "$WORK/oodle.zip" "lib/liboodle-data-shared.so" -d "$OUT_DIR"
 
 # --- libSkiaSharp ---
 curl -sfL -o "$WORK/skia.nupkg" \
-    "https://api.nuget.org/v3-flatcontainer/skiasharp.nativeassets.linux/${SKIASHARP_VERSION}/skiasharp.nativeassets.linux.${SKIASHARP_VERSION}.nupkg"
+    "https://api.nuget.org/v3-flatcontainer/skiasharp.nativeassets.linux.nodependencies/${SKIASHARP_VERSION}/skiasharp.nativeassets.linux.nodependencies.${SKIASHARP_VERSION}.nupkg"
 echo "${SKIASHARP_NUPKG_SHA256}  $WORK/skia.nupkg" | sha256sum -c --quiet -
 unzip -q -o -j "$WORK/skia.nupkg" "runtimes/linux-x64/native/libSkiaSharp.so" -d "$OUT_DIR"
 
@@ -64,6 +65,10 @@ gcc -shared -o "$OUT_DIR/libdetex.so" "${objs[@]}"
 for lib in liboodle-data-shared.so libSkiaSharp.so libdetex.so; do
     head -c 4 "$OUT_DIR/$lib" | grep -q $'^\x7fELF' || { echo "not an ELF library: $lib" >&2; exit 1; }
 done
+if ldd "$OUT_DIR/libSkiaSharp.so" | grep -qiE "fontconfig|freetype|libpng"; then
+    echo "libSkiaSharp.so links system graphics libraries; the release must not depend on them" >&2
+    exit 1
+fi
 nm -D "$OUT_DIR/libdetex.so" | grep -q " T detexDecompressTextureLinear" \
     || { echo "libdetex.so does not export detexDecompressTextureLinear" >&2; exit 1; }
 
