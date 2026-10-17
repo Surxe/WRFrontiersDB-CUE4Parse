@@ -21,10 +21,13 @@ namespace BatchExport.Cli
         [Description("Path to the .usmap mappings file (required)")]
         public string? MappingFilePath { get; set; }
 
-        [CommandOption("--verbose")]
-        [Description("Log every asset as it is processed")]
+        [CommandOption("--quiet")]
+        [Description("Turn off progress logging (on by default)")]
         [DefaultValue(false)]
-        public bool Verbose { get; set; }
+        public bool Quiet { get; set; }
+
+        /// <summary>Per-asset progress and warnings are logged unless --quiet is given.</summary>
+        public bool IsLoggingEnabled => !Quiet;
 
         public override ValidationResult Validate()
         {

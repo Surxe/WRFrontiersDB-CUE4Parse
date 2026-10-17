@@ -53,19 +53,19 @@ namespace BatchExport
                     ExportMorphTargets = false
                 };
 
-                var exporter = new AssetExporter(exporterOptions, settings.ExportOutputPath!, settings.Verbose);
+                var exporter = new AssetExporter(exporterOptions, settings.ExportOutputPath!, settings.IsLoggingEnabled);
                 exporter.ExportAsset(gameFileProvider, assetPath);
             }
             catch (Exception ex)
             {
-                Utils.LogInfo($"Failed to extract asset {assetPath}: {ex.Message}", settings.Verbose);
-                if (settings.Verbose)
+                Utils.LogInfo($"Failed to extract asset {assetPath}: {ex.Message}", settings.IsLoggingEnabled);
+                if (settings.IsLoggingEnabled)
                 {
-                    Utils.LogInfo($"Stack trace: {ex.StackTrace}", settings.Verbose);
+                    Utils.LogInfo($"Stack trace: {ex.StackTrace}", settings.IsLoggingEnabled);
                     if (ex.InnerException != null)
                     {
-                        Utils.LogInfo($"Inner exception: {ex.InnerException.Message}", settings.Verbose);
-                        Utils.LogInfo($"Inner stack trace: {ex.InnerException.StackTrace}", settings.Verbose);
+                        Utils.LogInfo($"Inner exception: {ex.InnerException.Message}", settings.IsLoggingEnabled);
+                        Utils.LogInfo($"Inner stack trace: {ex.InnerException.StackTrace}", settings.IsLoggingEnabled);
                     }
                 }
             }
@@ -142,6 +142,43 @@ namespace BatchExport
             return provider;
         }
 
+        /// <summary>
+        /// Loads Oodle (decompression) and Detex (BC textures). On Linux they are shipped next to
+        /// the executable and loaded by full path, so the export needs no environment setup and
+        /// never downloads anything. A missing library is an error, not a silent texture loss.
+        /// </summary>
+        private static void LoadNativeLibraries(ExportSettings settings)
+        {
+            if (OperatingSystem.IsLinux())
+            {
+                string oodlePath = Path.Combine(AppContext.BaseDirectory, OodleHelper.OodleFileName);
+                string detexPath = Path.Combine(AppContext.BaseDirectory, WrfConstants.LinuxDetexLibrary);
+                RequireNativeLibrary(oodlePath);
+                RequireNativeLibrary(detexPath);
+
+                Utils.LogInfo($"Initializing Oodle from {oodlePath}...", settings.IsLoggingEnabled);
+                OodleHelper.Initialize(oodlePath);
+
+                Utils.LogInfo($"Initializing Detex from {detexPath}...", settings.IsLoggingEnabled);
+                DetexHelper.Initialize(detexPath);
+                return;
+            }
+
+            Utils.LogInfo("Initializing Oodle...", settings.IsLoggingEnabled);
+            OodleHelper.DownloadOodleDll();
+            OodleHelper.Initialize(OodleHelper.OodleFileName);
+
+            Utils.LogInfo("Initializing Detex...", settings.IsLoggingEnabled);
+            DetexHelper.LoadDll();
+            DetexHelper.Initialize(DetexHelper.DLL_NAME);
+        }
+
+        private static void RequireNativeLibrary(string path)
+        {
+            if (!File.Exists(path))
+                throw new FileNotFoundException($"Required native library is missing: {path}. The Linux release ships it next to the executable.");
+        }
+
         public static int Main(string[] args)
         {
             return new CommandApp<ExportCommand>().Run(args);
@@ -149,65 +186,59 @@ namespace BatchExport
 
         public static int Export(ExportSettings settings)
         {
-            Utils.LogInfo("Output Directory: " + settings.ExportOutputPath, settings.Verbose);
+            Utils.LogInfo("Output Directory: " + settings.ExportOutputPath, settings.IsLoggingEnabled);
 
             // Ensure output directory exists
             if (!Directory.Exists(settings.ExportOutputPath))
             {
                 Directory.CreateDirectory(settings.ExportOutputPath!);
-                Utils.LogInfo("Created output directory.", settings.Verbose);
+                Utils.LogInfo("Created output directory.", settings.IsLoggingEnabled);
             }
 
             // Decrypt .pak to assets
-            if (settings.Verbose)
+            if (settings.IsLoggingEnabled)
             {
                 Log.Logger = new LoggerConfiguration().WriteTo.Console(theme: AnsiConsoleTheme.Literate).CreateLogger();
             }
 
-            Utils.LogInfo("Initializing Oodle...", settings.Verbose);
-            OodleHelper.DownloadOodleDll();
-            OodleHelper.Initialize(OodleHelper.OodleFileName);
+            LoadNativeLibraries(settings);
 
-            Utils.LogInfo("Initializing Detex...", settings.Verbose);
-            DetexHelper.LoadDll();
-            DetexHelper.Initialize(DetexHelper.DLL_NAME);
-
-            Utils.LogInfo("Creating version container and file provider...", settings.Verbose);
-            Utils.LogInfo($"Game directory: {settings.PakFilesDirectory}", settings.Verbose);
-            Utils.LogInfo($"Mappings file: {settings.MappingFilePath}", settings.Verbose);
-            Utils.LogInfo("Creating provider...", settings.Verbose);
-            Utils.LogInfo($"Using UE version: {WrfConstants.UnrealEngineVersion}, Texture platform: {WrfConstants.TexturePlatform}", settings.Verbose);
+            Utils.LogInfo("Creating version container and file provider...", settings.IsLoggingEnabled);
+            Utils.LogInfo($"Game directory: {settings.PakFilesDirectory}", settings.IsLoggingEnabled);
+            Utils.LogInfo($"Mappings file: {settings.MappingFilePath}", settings.IsLoggingEnabled);
+            Utils.LogInfo("Creating provider...", settings.IsLoggingEnabled);
+            Utils.LogInfo($"Using UE version: {WrfConstants.UnrealEngineVersion}, Texture platform: {WrfConstants.TexturePlatform}", settings.IsLoggingEnabled);
 
             var fileProvider = new DefaultFileProvider(settings.PakFilesDirectory!, SearchOption.AllDirectories, new VersionContainer(WrfConstants.UnrealEngineVersion, WrfConstants.TexturePlatform), StringComparer.Ordinal);
 
-            Utils.LogInfo("Setting mappings...", settings.Verbose);
+            Utils.LogInfo("Setting mappings...", settings.IsLoggingEnabled);
             fileProvider.MappingsContainer = new FileUsmapTypeMappingsProvider(settings.MappingFilePath!);
 
-            Utils.LogInfo("Initializing provider...", settings.Verbose);
+            Utils.LogInfo("Initializing provider...", settings.IsLoggingEnabled);
             fileProvider.Initialize();
-            Utils.LogInfo($"Files found after Initialize(): {fileProvider.Files.Count}", settings.Verbose);
+            Utils.LogInfo($"Files found after Initialize(): {fileProvider.Files.Count}", settings.IsLoggingEnabled);
 
-            Utils.LogInfo("Mounting provider...", settings.Verbose);
+            Utils.LogInfo("Mounting provider...", settings.IsLoggingEnabled);
             fileProvider.Mount();
-            Utils.LogInfo($"Files found after Mount(): {fileProvider.Files.Count}", settings.Verbose);
+            Utils.LogInfo($"Files found after Mount(): {fileProvider.Files.Count}", settings.IsLoggingEnabled);
 
-            Utils.LogInfo("Post-mounting provider...", settings.Verbose);
+            Utils.LogInfo("Post-mounting provider...", settings.IsLoggingEnabled);
             fileProvider.PostMount();
-            Utils.LogInfo($"Files found after PostMount(): {fileProvider.Files.Count}", settings.Verbose);
+            Utils.LogInfo($"Files found after PostMount(): {fileProvider.Files.Count}", settings.IsLoggingEnabled);
 
             fileProvider.ChangeCulture("en");
-            Utils.LogInfo($"Total files found by provider: {fileProvider.Files.Count}", settings.Verbose);
+            Utils.LogInfo($"Total files found by provider: {fileProvider.Files.Count}", settings.IsLoggingEnabled);
 
             List<string> exportDirectoriesToProcess = [WrfConstants.NeededExportsRoot];
-            Utils.LogInfo("Narrowed Directories that will be exported:", settings.Verbose);
+            Utils.LogInfo("Narrowed Directories that will be exported:", settings.IsLoggingEnabled);
             foreach (var exportDirectory in exportDirectoriesToProcess)
             {
-                Utils.LogInfo("\t" + exportDirectory, settings.Verbose);
+                Utils.LogInfo("\t" + exportDirectory, settings.IsLoggingEnabled);
             }
 
             // Export to .json
             Console.WriteLine("Starting file export...");
-            Utils.LogInfo("Please wait while the script exports files...", settings.Verbose);
+            Utils.LogInfo("Please wait while the script exports files...", settings.IsLoggingEnabled);
 
             var allFiles = fileProvider.Files.Select(kvp => kvp.Value.ToString()).ToList();
 
@@ -217,7 +248,7 @@ namespace BatchExport
             // Each worker builds a full independent DefaultFileProvider (mounts every pak +
             // the VFS index), so peak memory scales with the worker count.
             int workerCount = WrfConstants.WorkerCount;
-            Utils.LogInfo($"Using {workerCount} export worker(s)", settings.Verbose);
+            Utils.LogInfo($"Using {workerCount} export worker(s)", settings.IsLoggingEnabled);
 
             // Shared concurrent work queue
             var workQueue = new ConcurrentQueue<string>(allFiles);
@@ -238,13 +269,13 @@ namespace BatchExport
                             ? currentFilePath
                             : currentFilePath.Replace(".uasset", "");
 
-                        Utils.LogInfo("Exporting asset: " + assetPathForExport, settings.Verbose);
+                        Utils.LogInfo("Exporting asset: " + assetPathForExport, settings.IsLoggingEnabled);
                         ExtractAsset(localProvider, assetPathForExport, settings);
                         Interlocked.Increment(ref totalFilesExported);
                     }
                 });
 
-            Utils.LogInfo($"Processing complete. Files processed: {totalFilesProcessed}, Files exported: {totalFilesExported}", settings.Verbose);
+            Utils.LogInfo($"Processing complete. Files processed: {totalFilesProcessed}, Files exported: {totalFilesExported}", settings.IsLoggingEnabled);
             return 0;
         }
     }
