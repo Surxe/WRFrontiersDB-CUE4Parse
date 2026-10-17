@@ -25,31 +25,25 @@ namespace BatchExport
         private readonly ExporterOptions _options;
         private readonly string _outputPath;
         private readonly bool _isLoggingEnabled;
-        private readonly bool _shouldExportTextures;
-        private readonly bool _shouldExportMeshes;
-        private readonly string[] _textureExportDirectories;
 
-        public AssetExporter(ExporterOptions options, string outputPath, bool isLoggingEnabled, bool shouldExportTextures, bool shouldExportMeshes, string[] textureExportDirectories)
+        public AssetExporter(ExporterOptions options, string outputPath, bool isLoggingEnabled)
         {
             _options = options;
             _outputPath = outputPath;
             _isLoggingEnabled = isLoggingEnabled;
-            _shouldExportTextures = shouldExportTextures;
-            _shouldExportMeshes = shouldExportMeshes;
-            _textureExportDirectories = textureExportDirectories ?? Array.Empty<string>();
         }
 
         /// <summary>
-        /// Whether a texture's .png should be written. When TextureExportDirectories is
-        /// configured, only textures under those asset-path prefixes (e.g. UI icons) are
-        /// decoded; model material textures are skipped.
+        /// Whether a texture's .png should be written. Only textures under
+        /// WrfConstants.TextureExportDirectories (e.g. UI icons) are decoded; model material
+        /// textures are skipped, and so are WrfConstants.TextureExportExcludes.
         /// </summary>
-        private bool IsIconTexture(string assetPath)
+        private static bool IsIconTexture(UTexture2D texture, string assetPath)
         {
-            if (_textureExportDirectories.Length == 0)
-                return true;
+            if (WrfConstants.TextureExportExcludes.Any(name => texture.Name.Equals(name, StringComparison.OrdinalIgnoreCase)))
+                return false;
 
-            return _textureExportDirectories.Any(dir => assetPath.StartsWith(dir, StringComparison.OrdinalIgnoreCase));
+            return WrfConstants.TextureExportDirectories.Any(dir => assetPath.StartsWith(dir, StringComparison.OrdinalIgnoreCase));
         }
 
         public void ExportAsset(DefaultFileProvider provider, string assetPath)
@@ -86,7 +80,7 @@ namespace BatchExport
                     }
 
                     // Export only the first texture found if texture export is enabled
-                    if (export is UTexture2D texture && !textureExported && _shouldExportTextures && IsIconTexture(assetPath))
+                    if (export is UTexture2D texture && !textureExported && IsIconTexture(texture, assetPath))
                     {
                         try
                         {
@@ -272,7 +266,7 @@ namespace BatchExport
             // Export as a list containing the single mesh
             ExportToJson(new[] { mesh }, assetPath);
 
-            if (_shouldExportMeshes)
+            if (WrfConstants.ExportMeshes)
             {
                 ExportMeshGeometry(mesh, assetPath);
             }
@@ -283,7 +277,7 @@ namespace BatchExport
             // Export as a list containing the single mesh
             ExportToJson(new[] { mesh }, assetPath);
 
-            if (_shouldExportMeshes)
+            if (WrfConstants.ExportMeshes)
             {
                 ExportMeshGeometry(mesh, assetPath);
             }
@@ -294,7 +288,7 @@ namespace BatchExport
             // Export as a list containing the single skeleton
             ExportToJson(new[] { skeleton }, assetPath);
 
-            if (_shouldExportMeshes)
+            if (WrfConstants.ExportMeshes)
             {
                 ExportMeshGeometry(skeleton, assetPath);
             }

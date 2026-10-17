@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 18
 VisualStudioVersion = 18.1.11312.151 d18.0
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "BatchExport", "src\BatchExport.csproj", "{1D0F3D41-0AEC-4699-BA82-E56E1A64B0A5}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WRFrontiersDB-CUE4Parse", "src\WRFrontiersDB-CUE4Parse.csproj", "{1D0F3D41-0AEC-4699-BA82-E56E1A64B0A5}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "CUE4Parse", "CUE4Parse\CUE4Parse\CUE4Parse.csproj", "{709E71E6-6D7B-2E64-5877-172907498BE6}"
 EndProject

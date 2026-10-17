@@ -9,11 +9,7 @@
 
   <ItemGroup>
     <PackageReference Include="SkiaSharp" Version="3.119.1" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Include="appsettings*.json" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="presets/**/*" CopyToOutputDirectory="PreserveNewest" />
+    <PackageReference Include="Spectre.Console.Cli" Version="0.57.2" />
   </ItemGroup>
 
   <ItemGroup>

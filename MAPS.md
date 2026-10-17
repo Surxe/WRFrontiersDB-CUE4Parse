@@ -1,32 +1,12 @@
 # Map Export
 
-`--export-mode Maps` exports levels instead of individual assets: for each selected `.umap` it
-writes a **scene** describing every actor and component of the level with resolved world
+A map is exported as a **scene**: for each level, every actor and component with resolved world
 transforms, plus the geometry the scene refers to. The output is enough to rebuild the level
 outside the engine: where every mesh sits, the terrain, the invisible blocking volumes, the
 navigation mesh, and the gameplay actors with their properties.
 
-```bash
-BatchExport --preset WarRobotsFrontiers \
-  --export-mode Maps \
-  --map-filters "Sparrow/Maps/Mont/Mont,Sparrow/Maps/EM1/EM1" \
-  --pak-files-directory "C:\Game" \
-  --export-output-path "C:\MapExport" \
-  --mapping-file-path "C:\mappings.usmap"
-```
-
-| Argument | Description |
-|----------|-------------|
-| `--export-mode <Assets\|Maps>` | `Assets` (default) is the regular per-asset export; `Maps` exports levels as scenes |
-| `--map-filters <list>` | Comma-separated `.umap` package paths (without extension) to export as root worlds. An entry matches the full path or a trailing part of it (`Mont/Mont`). Unset = every `.umap` under the needed directories |
-| `--map-use-nanite-meshes <true\|false>` | Export full Nanite geometry instead of the fallback LOD0 (default `false`) |
-| `--map-export-raw-levels <true\|false>` | Also dump each visited level package as plain JSON under `maps/<World>/levels/` (default `false`) |
-
-Pass the persistent level of each map as the filter. Its streaming sublevels and level instances
-are followed from there; exporting a sublevel on its own gives that sublevel only.
-
-Peak memory is roughly 1-1.5 GB for a large map. The worker count setting does not apply: maps
-are exported one after another on a single file provider.
+Map export is not part of the command-line interface in this version. It returns with the
+phased export (see `docs/future-ideas.md`). The sections below describe the output format.
 
 ## What a map is made of
 
@@ -64,7 +44,7 @@ default, which the game files do not contain.
     landscape/*.r16     terrain height grids
     splines/*.uemodel   spline meshes, already deformed along their spline
     navmesh/*.json      navigation mesh polygons
-    levels/*.json       raw level dumps (only with --map-export-raw-levels)
+    levels/*.json       raw level dumps (not produced in this version; see docs/future-ideas.md)
   assets/<package path>.uemodel        static mesh geometry, shared by all maps
   assets/<package path>.meshinfo.json  bounds, materials, sockets, collision of that mesh
   config/**/*.ini       the game's config files (collision profiles and channels)
@@ -183,7 +163,7 @@ picture merge it over `templates[template]`, field by field for objects. Propert
 already carries as resolved fields are left out of `props`: transforms and attachment, the mesh
 pointer, shape sizes, visibility, the collision body, and render-only data such as material
 overrides. Properties above 256 KB are replaced by `{"__truncated": true, "__chars": n,
-"__keys": [...]}`; `--map-export-raw-levels` keeps them.
+"__keys": [...]}`. Raw dumps that keep them are not produced in this version.
 
 An object reference is `{"ObjectName": "Class'Outer:PersistentLevel.Name'", "ObjectPath": "..."}`.
 To resolve one to an actor, match the name against the actors of the same `level`.

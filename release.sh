@@ -1,7 +1,7 @@
 
 #!/bin/bash
 
-# BatchExport Release Script
+# WRFrontiersDB-CUE4Parse Release Script
 # This script helps create releases with proper validation and versioning
 
 set -e  # Exit on any error
@@ -21,8 +21,8 @@ print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 # Function to check if we're in the right directory
 check_directory() {
-    if [ ! -f "src/BatchExport.csproj" ]; then
-        print_error "Must be run from the BatchExport repository root directory"
+    if [ ! -f "src/WRFrontiersDB-CUE4Parse.csproj" ]; then
+        print_error "Must be run from the WRFrontiersDB-CUE4Parse repository root directory"
         exit 1
     fi
 }
@@ -91,12 +91,12 @@ create_release() {
     
     print_success "Tag pushed to GitHub"
     print_info "GitHub Actions workflow will now build and create the release"
-    print_info "Monitor progress at: https://github.com/Surxe/CUE4P-BatchExport/actions"
+    print_info "Monitor progress at: https://github.com/Surxe/WRFrontiersDB-CUE4Parse/actions"
 }
 
 # Function to show help
 show_help() {
-    echo "BatchExport Release Script"
+    echo "WRFrontiersDB-CUE4Parse Release Script"
     echo ""
     echo "Usage:"
     echo "  ./release.sh <version> [options]"
@@ -223,4 +223,4 @@ create_release "$VERSION" "$MESSAGE" "$IS_TEST"
 print_success "Release process completed!"
 print_info "The GitHub Actions workflow is now building your release."
 print_info "You can monitor progress and download artifacts at:"
-print_info "https://github.com/Surxe/CUE4P-BatchExport/releases"
+print_info "https://github.com/Surxe/WRFrontiersDB-CUE4Parse/releases"
