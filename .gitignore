@@ -1,0 +1,35 @@
+
+# Build outputs
+src/bin/
+src/obj/
+
+# Exports directory
+src/Exports/
+
+# Visual Studio files
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+.vs/
+
+# NuGet packages
+*.nupkg
+*.snupkg
+
+# Runtime files
+*.dll
+*.exe
+*.pdb
+!src/oo2core_9_win64.dll
+
+# User configuration files (only ignore root-level user configs)
+src/appsettings.json
+src/NeededExports.json
+
+# Keep preset files in git (these should be tracked)
+!src/presets/*/
+!src/presets/*/appsettings.json
+!src/presets/*/NeededExports.json
+
+notes.md
