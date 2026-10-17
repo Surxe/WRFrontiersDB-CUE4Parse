@@ -5,8 +5,13 @@ transforms, plus the geometry the scene refers to. The output is enough to rebui
 outside the engine: where every mesh sits, the terrain, the invisible blocking volumes, the
 navigation mesh, and the gameplay actors with their properties.
 
-Map export is not part of the command-line interface in this version. It returns with the
-phased export (see `docs/future-ideas.md`). The sections below describe the output format.
+Maps are the third phase of every run. They are written to `<output>/map-export/`, one scene per
+released map. The released maps come from the game's own data (`src/MapList.cs`): the maps the
+matchmaking queues list, the ones the map name table adds (the tutorial), and the firing range.
+
+Each map is exported by its persistent level. Its streaming sublevels and level instances are
+followed from there. Maps run one after another on the main provider, each with a fresh
+exporter, so memory does not grow from map to map. Peak memory is about 650 MB for a large map.
 
 ## What a map is made of
 
