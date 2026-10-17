@@ -15,6 +15,9 @@ namespace BatchExport
 
         public const ETextureFormat TextureFormat = ETextureFormat.Png;
 
+        /// <summary>Linux build of the Detex texture library, shipped next to the executable.</summary>
+        public const string LinuxDetexLibrary = "libdetex.so";
+
         /// <summary>Assets exported to JSON or mesh files. Maps are handled separately.</summary>
         public static readonly string[] AssetFileExtensions = [".uasset", ".locres"];
 

@@ -31,6 +31,8 @@ class. Everything else that is specific to War Robots: Frontiers (the Unreal Eng
 texture settings, which paths to skip, and which textures to export) is a constant in
 `src/WrfConstants.cs`. Changing one of those means editing the file and rebuilding.
 
+Progress is logged to the console by default. Pass `--quiet` to turn it off.
+
 ## Building
 
 Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0).
@@ -44,7 +46,21 @@ dotnet build src/WRFrontiersDB-CUE4Parse.csproj --configuration Release
 The CUE4Parse submodule is pinned in `.gitmodules`. Run `git submodule update --init` if it is
 empty.
 
+### Linux natives
+
+On Linux the export loads three native libraries from the directory of the executable: Oodle
+(`liboodle-data-shared.so`), Detex (`libdetex.so`) and SkiaSharp (`libSkiaSharp.so`). The release
+zip ships them next to the executable. For a local build, fetch them into the output directory:
+
+```bash
+scripts/fetch-linux-natives.sh bin/Release/net10.0
+```
+
+Detex is built from source at a pinned commit (`hglm/detex`), because CUE4Parse ships only a
+Windows build. Oodle and SkiaSharp are fetched from their release packages at pinned versions.
+The export stops with an error if a library is missing.
+
 ## Releases
 
 Pushing a `v*.*.*` tag builds Windows and Linux binaries and attaches them to a GitHub
-release. See `RELEASES.md`.
+release. The Linux zip includes the native libraries above. See `RELEASES.md`.

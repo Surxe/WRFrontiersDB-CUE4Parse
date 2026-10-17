@@ -6,6 +6,7 @@ GitHub Actions builds and releases the Windows and Linux binaries.
 
 Each release package is a `.zip` containing:
 - **Self-contained executable**: no .NET runtime installation required
+- **Native libraries** (Linux only): `liboodle-data-shared.so`, `libdetex.so`, `libSkiaSharp.so`, next to the executable. They are fetched and built by `scripts/fetch-linux-natives.sh` in CI
 - **Documentation**: `README.md`
 
 Asset names: `WRFrontiersDB-CUE4Parse-windows-x64.zip` and `WRFrontiersDB-CUE4Parse-linux-x64.zip`.

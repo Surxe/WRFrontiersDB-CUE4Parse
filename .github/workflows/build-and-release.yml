@@ -43,6 +43,10 @@ jobs:
       run: |
         dotnet publish src/WRFrontiersDB-CUE4Parse.csproj --configuration Release --runtime ${{ matrix.os }} --self-contained true --output ./publish/${{ matrix.os }} -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
 
+    - name: Add Linux native libraries
+      if: matrix.os == 'linux-x64'
+      run: scripts/fetch-linux-natives.sh ./publish/${{ matrix.os }}
+
     - name: Create archive (Windows)
       if: matrix.os == 'win-x64'
       run: |
