@@ -131,6 +131,13 @@ namespace BatchExport
             {
                 if (Warnings.Count < 2000) Warnings.Add(message);
             }
+
+            /// <summary>A warning that is also an export failure: something that should be in the scene is not.</summary>
+            public void Fail(string message)
+            {
+                Warn(message);
+                Failures.Record(WorldName, message);
+            }
         }
 
         /// <summary>Everything needed to resolve transforms inside one visit of one level.</summary>
@@ -153,12 +160,14 @@ namespace BatchExport
             }
             catch (Exception ex)
             {
+                Failures.Record(worldPackagePath, ex);
                 Console.WriteLine($"Failed to load map {worldPackagePath}: {ex.Message}");
                 return false;
             }
 
             if (world == null)
             {
+                Failures.Record(worldPackagePath, "no UWorld export");
                 Console.WriteLine($"No UWorld export in {worldPackagePath} - skipping");
                 return false;
             }
@@ -168,6 +177,7 @@ namespace BatchExport
             catch (Exception ex) { Console.WriteLine($"Failed to load the persistent level of {worldPackagePath}: {ex.Message}"); }
             if (rootLevel == null)
             {
+                Failures.Record(worldPackagePath, "no loadable persistent level");
                 Console.WriteLine($"Map {worldPackagePath} has no loadable persistent level - skipping");
                 return false;
             }
@@ -191,7 +201,7 @@ namespace BatchExport
             {
                 ULevelStreaming? streaming;
                 try { streaming = ptr.Load<ULevelStreaming>(); }
-                catch (Exception ex) { scene.Warn($"streaming level object failed to load: {ex.Message}"); continue; }
+                catch (Exception ex) { scene.Fail($"streaming level object failed to load: {ex.Message}"); continue; }
                 if (streaming == null) continue;
 
                 var assetName = TryEff<FSoftObjectPath>(streaming, "WorldAsset", out var assetPath) ? assetPath.AssetPathName.Text : null;
@@ -371,7 +381,7 @@ namespace BatchExport
                 }
                 catch (Exception ex)
                 {
-                    scene.Warn($"{world.Name}: actor failed to load: {ex.Message}");
+                    scene.Fail($"{world.Name}: actor failed to load: {ex.Message}");
                 }
             }
 
@@ -403,7 +413,7 @@ namespace BatchExport
                 }
                 catch (Exception ex)
                 {
-                    scene.Warn($"{world.Name}:{actor.Name}: actor export failed: {ex.Message}");
+                    scene.Fail($"{world.Name}:{actor.Name}: actor export failed: {ex.Message}");
                     continue;
                 }
                 scene.ActorCount++;
@@ -518,7 +528,7 @@ namespace BatchExport
                 }
                 catch (Exception ex)
                 {
-                    scene.Warn($"{actor.Name}.{component.Name}: component export failed: {ex.Message}");
+                    scene.Fail($"{actor.Name}.{component.Name}: component export failed: {ex.Message}");
                     componentArray.Add(new JObject { ["name"] = component.Name, ["class"] = component.ExportType, ["kind"] = "error", ["error"] = ex.Message });
                 }
             }
@@ -783,7 +793,7 @@ namespace BatchExport
 
             UBodySetup? bodySetup;
             try { bodySetup = bodySetupIndex.Load<UBodySetup>(); }
-            catch (Exception ex) { scene.Warn($"{actor.Name}: brush body setup failed to load: {ex.Message}"); return hulls; }
+            catch (Exception ex) { scene.Fail($"{actor.Name}: brush body setup failed to load: {ex.Message}"); return hulls; }
 
             foreach (var elem in bodySetup?.AggGeom?.ConvexElems ?? [])
                 hulls.Add(ConvexJson(elem));
@@ -860,7 +870,13 @@ namespace BatchExport
             // would pin the mesh's vertex data in memory until the level itself is released.
             UStaticMesh? mesh;
             try { mesh = LoadStaticMesh(key); }
-            catch (Exception ex) { scene.Warn($"mesh {key} is not loadable from the game files: {ex.Message}"); return null; }
+            catch (Exception ex)
+            {
+                var message = $"mesh {key} is not loadable from the game files: {ex.Message}";
+                if (WrfConstants.ExpectedMissingMeshes.Contains(key)) scene.Warn(message);
+                else scene.Fail(message);
+                return null;
+            }
             if (mesh == null) { scene.Warn($"mesh {key} is not in the game files"); return null; }
 
             var packagePath = (mesh.Owner?.Name ?? key.Split('.')[0]).TrimStart('/');
@@ -890,7 +906,7 @@ namespace BatchExport
             }
             catch (Exception ex)
             {
-                scene.Warn($"mesh {key} geometry export failed: {ex.Message}");
+                scene.Fail($"mesh {key} geometry export failed: {ex.Message}");
             }
 
             if (mesh.RenderData?.Bounds is { } bounds)
@@ -949,7 +965,7 @@ namespace BatchExport
             }
             catch (Exception ex)
             {
-                scene.Warn($"mesh {key} collision export failed: {ex.Message}");
+                scene.Fail($"mesh {key} collision export failed: {ex.Message}");
             }
 
             WriteFile($"{relativeBase}.meshinfo.json", System.Text.Encoding.UTF8.GetBytes(info.ToString(Formatting.None)));
@@ -1088,7 +1104,7 @@ namespace BatchExport
             }
             catch (Exception ex)
             {
-                scene.Warn($"{landscape.GetPathName()}: landscape export failed: {ex.Message}");
+                scene.Fail($"{landscape.GetPathName()}: landscape export failed: {ex.Message}");
                 return null;
             }
         }
@@ -1124,7 +1140,7 @@ namespace BatchExport
             }
             catch (Exception ex)
             {
-                scene.Warn($"{actor.Name}.{spline.Name}: spline mesh export failed: {ex.Message}");
+                scene.Fail($"{actor.Name}.{spline.Name}: spline mesh export failed: {ex.Message}");
                 return null;
             }
         }
@@ -1204,7 +1220,7 @@ namespace BatchExport
             }
             catch (Exception ex)
             {
-                scene.Warn($"{navMesh.GetPathName()}: navmesh export failed: {ex.Message}");
+                scene.Fail($"{navMesh.GetPathName()}: navmesh export failed: {ex.Message}");
                 return null;
             }
         }
@@ -1237,7 +1253,7 @@ namespace BatchExport
             }
             catch (Exception ex)
             {
-                scene.Warn($"{world.Name}: raw level dump failed: {ex.Message}");
+                scene.Fail($"{world.Name}: raw level dump failed: {ex.Message}");
             }
         }
 

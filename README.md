@@ -8,11 +8,16 @@ database pipeline. It is specific to that game; the generic multi-game tool live
 
 ## What it exports
 
-- `.uasset` packages under `WRFrontiers/Content`, as JSON. Materials, animations, audio and
-  other prefixes listed in `src/WrfConstants.cs` are skipped.
-- Mesh geometry for static and skeletal meshes (`.uemodel`).
-- UI icon textures as PNG, from the directories in `src/WrfConstants.cs`.
-- `.locres` localization files, as JSON.
+One run exports everything, in phases:
+
+1. **Assets**: `.uasset` packages under `WRFrontiers/Content`, as JSON, plus UI icon textures as
+   PNG and `.locres` localization files as JSON. Materials, animations, audio and the other
+   prefixes in `src/WrfConstants.cs` are skipped.
+2. **Meshes**: static and skeletal meshes (`SM_`, `SK_`, `SKEL_`), as JSON and `.uemodel` geometry.
+3. **Maps**: every released map as a scene, into `<output>/map-export/maps/`. The map list comes
+   from the game's own data (see `src/MapList.cs`). See `MAPS.md` for the format.
+4. **Config**: the game's `.ini` files, into `<output>/map-export/config/`. The scenes refer to
+   the collision profiles they define.
 
 ## Usage
 
@@ -32,6 +37,25 @@ texture settings, which paths to skip, and which textures to export) is a consta
 `src/WrfConstants.cs`. Changing one of those means editing the file and rebuilding.
 
 Progress is logged to the console by default. Pass `--quiet` to turn it off.
+
+### Memory
+
+Worker counts are computed per phase from the memory budget, so there is no worker option.
+The budget is the .NET GC heap limit: 75% of the process's memory cap when one is set (for
+example `systemd-run --scope -p MemoryMax=1536M`), otherwise physical RAM. The per-worker
+estimates are constants in `src/WrfConstants.cs`. The startup log prints the budget and the
+worker counts.
+
+### Exit codes
+
+| Code | Meaning |
+|------|---------|
+| 0 | Everything exported. |
+| 1 | The export finished, but something failed. The summary lists the failures per phase. |
+| 3 | Out of memory. The run stopped at once; raise the memory cap. |
+
+Nothing is skipped silently. A failure that is expected (for example, an editor-only mesh that
+maps reference but the game does not ship) is listed by name in `src/WrfConstants.cs`.
 
 ## Building
 

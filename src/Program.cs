@@ -11,6 +11,8 @@ using Newtonsoft.Json;
 using Serilog;
 using Serilog.Sinks.SystemConsole.Themes;
 using System.Collections.Concurrent;
+using System.Diagnostics;
+using System.Runtime;
 
 namespace BatchExport
 {
@@ -58,6 +60,7 @@ namespace BatchExport
             }
             catch (Exception ex)
             {
+                Failures.Record(assetPath, ex);
                 Utils.LogInfo($"Failed to extract asset {assetPath}: {ex.Message}", settings.IsLoggingEnabled);
                 if (settings.IsLoggingEnabled)
                 {
@@ -98,11 +101,13 @@ namespace BatchExport
                 }
                 else
                 {
+                    Failures.Record(assetPath, "locres file not found in the provider");
                     Console.WriteLine($"Could not find locres file: {assetPath}");
                 }
             }
             catch (Exception ex)
             {
+                Failures.Record(assetPath, ex);
                 Console.WriteLine($"An error occurred when parsing locres file {assetPath}: {ex.Message}");
             }
         }
@@ -179,6 +184,129 @@ namespace BatchExport
                 throw new FileNotFoundException($"Required native library is missing: {path}. The Linux release ships it next to the executable.");
         }
 
+        private static bool IsMeshAsset(string assetPath)
+        {
+            string fileName = Path.GetFileName(assetPath);
+            return WrfConstants.MeshAssetPrefixes.Any(prefix => fileName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>
+        /// Workers for a phase from the memory budget. Worker 0 is the main provider; each extra worker
+        /// mounts its own provider and needs the phase's working set on top.
+        /// </summary>
+        private static int WorkersFor(long budget, long workerBytes)
+        {
+            long fit = (budget - WrfConstants.ProviderBytes) / workerBytes;
+            return (int)Math.Clamp(fit, 1, Environment.ProcessorCount);
+        }
+
+        /// <summary>Drops what the last phase left behind, so the next one starts from the baseline.</summary>
+        private static void CollectBetweenPhases()
+        {
+            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
+            GC.Collect();
+        }
+
+        private static (string, int, int, TimeSpan) RunAssetPhase(string phase, List<string> files, int workers, DefaultFileProvider mainProvider, ExportSettings settings)
+        {
+            Failures.Phase = phase;
+            Console.WriteLine($"Phase {phase}: {files.Count} file(s) on {workers} worker(s)...");
+            var stopwatch = Stopwatch.StartNew();
+
+            var workQueue = new ConcurrentQueue<string>(files);
+            int exported = 0;
+            Parallel.For(0, workers, new ParallelOptions { MaxDegreeOfParallelism = workers }, worker =>
+            {
+                // Worker 0 reuses the main provider; the others mount their own.
+                DefaultFileProvider? ownProvider = worker == 0 ? null : CreateIndependentProvider(settings);
+                var provider = ownProvider ?? mainProvider;
+                try
+                {
+                    while (workQueue.TryDequeue(out var assetPath))
+                    {
+                        Utils.LogInfo("Exporting asset: " + assetPath, settings.IsLoggingEnabled);
+                        ExtractAsset(provider, assetPath, settings);
+                        Interlocked.Increment(ref exported);
+                    }
+                }
+                finally
+                {
+                    ownProvider?.Dispose();
+                }
+            });
+
+            CollectBetweenPhases();
+            return (phase, exported, files.Count, stopwatch.Elapsed);
+        }
+
+        /// <summary>
+        /// Exports every released map as a scene into the map export directory, on the main provider.
+        /// A new MapExporter per world, so its caches don't grow from map to map.
+        /// </summary>
+        private static (string, int, int, TimeSpan) RunMapPhase(DefaultFileProvider provider, ExportSettings settings)
+        {
+            Failures.Phase = "maps";
+            var stopwatch = Stopwatch.StartNew();
+            string outputPath = Path.Combine(settings.ExportOutputPath!, WrfConstants.MapExportDirectory);
+
+            List<string> mapPackages;
+            try
+            {
+                mapPackages = MapList.ReleasedMapPackages(provider);
+            }
+            catch (Exception ex)
+            {
+                Failures.Record("map list", ex);
+                return ("maps", 0, 0, stopwatch.Elapsed);
+            }
+            Console.WriteLine($"Phase maps: {mapPackages.Count} released map(s): {string.Join(", ", mapPackages.Select(Path.GetFileName))}");
+
+            var packages = new HashSet<string>(provider.Files.Values.Select(file => file.ToString()), StringComparer.OrdinalIgnoreCase);
+            int exported = 0;
+            foreach (var mapPackage in mapPackages)
+            {
+                if (!packages.Contains(mapPackage + ".umap"))
+                {
+                    Failures.Record(mapPackage, "released map has no .umap in the game files");
+                    continue;
+                }
+
+                var exporter = new MapExporter(provider, outputPath, new MapExportOptions { IsLoggingEnabled = settings.IsLoggingEnabled });
+                if (exporter.ExportWorld(mapPackage))
+                    exported++;
+                CollectBetweenPhases();
+            }
+            return ("maps", exported, mapPackages.Count, stopwatch.Elapsed);
+        }
+
+        /// <summary>The game's .ini config files, which define the collision profiles and channels the scenes refer to.</summary>
+        private static (string, int, int, TimeSpan) RunConfigPhase(DefaultFileProvider provider, ExportSettings settings)
+        {
+            Failures.Phase = "config";
+            var stopwatch = Stopwatch.StartNew();
+            string outputPath = Path.Combine(settings.ExportOutputPath!, WrfConstants.MapExportDirectory, "config");
+
+            var configFiles = provider.Files.Values.Where(file => file.ToString().EndsWith(".ini", StringComparison.OrdinalIgnoreCase)).ToList();
+            int exported = 0;
+            foreach (var file in configFiles)
+            {
+                string path = file.ToString();
+                try
+                {
+                    string destinationFilePath = Path.Combine(outputPath, path);
+                    CreateNeededDirectories(destinationFilePath);
+                    File.WriteAllBytes(destinationFilePath, file.Read());
+                    exported++;
+                }
+                catch (Exception ex)
+                {
+                    Failures.Record(path, ex);
+                    Utils.LogInfo($"Failed to export config file {path}: {ex.Message}", settings.IsLoggingEnabled);
+                }
+            }
+            return ("config", exported, configFiles.Count, stopwatch.Elapsed);
+        }
+
         public static int Main(string[] args)
         {
             return new CommandApp<ExportCommand>().Run(args);
@@ -186,6 +314,12 @@ namespace BatchExport
 
         public static int Export(ExportSettings settings)
         {
+            Failures.AbortOnOutOfMemory();
+
+            // The GC heap hard limit when one is set (75% of a cgroup MemoryMax), otherwise physical RAM.
+            long budget = GC.GetGCMemoryInfo().TotalAvailableMemoryBytes;
+            Console.WriteLine($"Memory budget: {budget / (1024 * 1024)} MB");
+
             Utils.LogInfo("Output Directory: " + settings.ExportOutputPath, settings.IsLoggingEnabled);
 
             // Ensure output directory exists
@@ -236,47 +370,31 @@ namespace BatchExport
                 Utils.LogInfo("\t" + exportDirectory, settings.IsLoggingEnabled);
             }
 
-            // Export to .json
-            Console.WriteLine("Starting file export...");
-            Utils.LogInfo("Please wait while the script exports files...", settings.IsLoggingEnabled);
+            var allFiles = fileProvider.Files.Values.Select(file => file.ToString()).ToList();
+            var assetFiles = allFiles
+                .Where(path => ShouldProcessFile(path, exportDirectoriesToProcess))
+                .Select(path => path.EndsWith(".locres", StringComparison.OrdinalIgnoreCase) ? path : path.Replace(".uasset", ""))
+                .ToList();
+            var meshFiles = assetFiles.Where(IsMeshAsset).ToList();
+            var otherFiles = assetFiles.Where(path => !IsMeshAsset(path)).ToList();
 
-            var allFiles = fileProvider.Files.Select(kvp => kvp.Value.ToString()).ToList();
+            int assetWorkers = WorkersFor(budget, WrfConstants.AssetWorkerBytes);
+            int meshWorkers = WorkersFor(budget, WrfConstants.MeshWorkerBytes);
+            Console.WriteLine($"Workers: assets {assetWorkers}, meshes {meshWorkers}, maps 1");
 
-            int totalFilesProcessed = 0;
-            int totalFilesExported = 0;
+            // Backstop for a mesh that the name prefix missed and that lands in the asset phase.
+            AssetExporter.MeshGeometrySlots = new SemaphoreSlim(meshWorkers);
 
-            // Each worker builds a full independent DefaultFileProvider (mounts every pak +
-            // the VFS index), so peak memory scales with the worker count.
-            int workerCount = WrfConstants.WorkerCount;
-            Utils.LogInfo($"Using {workerCount} export worker(s)", settings.IsLoggingEnabled);
+            var timings = new List<(string Phase, int Exported, int Total, TimeSpan Time)>();
+            timings.Add(RunAssetPhase("assets", otherFiles, assetWorkers, fileProvider, settings));
+            timings.Add(RunAssetPhase("meshes", meshFiles, meshWorkers, fileProvider, settings));
+            timings.Add(RunMapPhase(fileProvider, settings));
+            timings.Add(RunConfigPhase(fileProvider, settings));
 
-            // Shared concurrent work queue
-            var workQueue = new ConcurrentQueue<string>(allFiles);
+            foreach (var (phase, exported, total, time) in timings)
+                Console.WriteLine($"Phase {phase}: {exported}/{total} in {time:mm\\:ss}");
 
-            // Run N workers pulling from the queue until empty
-            Parallel.ForEach(Enumerable.Range(0, workerCount), new ParallelOptions { MaxDegreeOfParallelism = workerCount }, _ =>
-                {
-                    var localProvider = CreateIndependentProvider(settings);
-
-                    while (workQueue.TryDequeue(out var currentFilePath))
-                    {
-                        Interlocked.Increment(ref totalFilesProcessed);
-
-                        if (!ShouldProcessFile(currentFilePath, exportDirectoriesToProcess))
-                            continue;
-
-                        string assetPathForExport = currentFilePath.EndsWith(".locres", StringComparison.OrdinalIgnoreCase)
-                            ? currentFilePath
-                            : currentFilePath.Replace(".uasset", "");
-
-                        Utils.LogInfo("Exporting asset: " + assetPathForExport, settings.IsLoggingEnabled);
-                        ExtractAsset(localProvider, assetPathForExport, settings);
-                        Interlocked.Increment(ref totalFilesExported);
-                    }
-                });
-
-            Utils.LogInfo($"Processing complete. Files processed: {totalFilesProcessed}, Files exported: {totalFilesExported}", settings.IsLoggingEnabled);
-            return 0;
+            return Failures.Summarize();
         }
     }
 }

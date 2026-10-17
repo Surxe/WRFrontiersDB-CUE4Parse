@@ -26,6 +26,12 @@ namespace BatchExport
         private readonly string _outputPath;
         private readonly bool _isLoggingEnabled;
 
+        /// <summary>
+        /// Limits concurrent mesh geometry builds to the mesh phase's worker count, so a mesh that
+        /// lands in the asset phase (missed by the name prefix) can't push past the memory budget.
+        /// </summary>
+        public static SemaphoreSlim MeshGeometrySlots { get; set; } = new(1);
+
         public AssetExporter(ExporterOptions options, string outputPath, bool isLoggingEnabled)
         {
             _options = options;
@@ -74,6 +80,7 @@ namespace BatchExport
                         }
                         catch (Exception ex)
                         {
+                            Failures.Record(assetPath, ex);
                             Utils.LogInfo($"Failed to export SVG {export.Name} from {assetPath}: {ex.Message}", _isLoggingEnabled);
                         }
                         continue;
@@ -89,6 +96,7 @@ namespace BatchExport
                         }
                         catch (Exception ex)
                         {
+                            Failures.Record(assetPath, ex);
                             Utils.LogInfo($"Failed to export texture from {assetPath}: {ex.Message}", _isLoggingEnabled);
                         }
                         continue;
@@ -122,6 +130,7 @@ namespace BatchExport
                     }
                     catch (Exception ex)
                     {
+                        Failures.Record(assetPath, ex);
                         Utils.LogInfo($"Failed to export {export.Name} from {assetPath}: {ex.Message}", _isLoggingEnabled);
                     }
                 }
@@ -131,6 +140,7 @@ namespace BatchExport
             }
             catch (Exception ex)
             {
+                Failures.Record(assetPath, ex);
                 Utils.LogInfo($"Failed to export asset {assetPath}: {ex.Message}", _isLoggingEnabled);
             }
         }
@@ -163,7 +173,7 @@ namespace BatchExport
                 var textureData = texture.Decode();
                 if (textureData == null)
                 {
-                    Utils.LogInfo($"Failed to decode texture {assetPath} - skipping", _isLoggingEnabled);
+                    TextureFailed(assetPath, $"Failed to decode texture {assetPath} - skipping");
                     return;
                 }
 
@@ -174,7 +184,7 @@ namespace BatchExport
                 var pixelPtr = bitmap.GetPixels();
                 if (pixelPtr == IntPtr.Zero)
                 {
-                    Utils.LogInfo($"Failed to get pixel pointer for texture {assetPath} - skipping", _isLoggingEnabled);
+                    TextureFailed(assetPath, $"Failed to get pixel pointer for texture {assetPath} - skipping");
                     return;
                 }
 
@@ -182,7 +192,7 @@ namespace BatchExport
                 int expectedSize = bitmap.ByteCount;
                 if (textureData.Data.Length != expectedSize)
                 {
-                    Utils.LogInfo($"Data size mismatch for texture {assetPath}: expected {expectedSize} bytes, got {textureData.Data.Length} bytes - skipping", _isLoggingEnabled);
+                    TextureFailed(assetPath, $"Data size mismatch for texture {assetPath}: expected {expectedSize} bytes, got {textureData.Data.Length} bytes - skipping");
                     return;
                 }
 
@@ -196,7 +206,7 @@ namespace BatchExport
                     using var data = pixmap.Encode(options);
                     if (data == null)
                     {
-                        Utils.LogInfo($"Failed to create data from bitmap for texture {assetPath} - skipping", _isLoggingEnabled);
+                        TextureFailed(assetPath, $"Failed to create data from bitmap for texture {assetPath} - skipping");
                         return;
                     }
                     using var stream = File.OpenWrite(destinationFilePath);
@@ -208,13 +218,13 @@ namespace BatchExport
                     using var image = SKImage.FromBitmap(bitmap);
                     if (image == null)
                     {
-                        Utils.LogInfo($"Failed to create image from bitmap for texture {assetPath} - skipping", _isLoggingEnabled);
+                        TextureFailed(assetPath, $"Failed to create image from bitmap for texture {assetPath} - skipping");
                         return;
                     }
                     using var data = image.Encode(GetSkiaFormat(_options.TextureFormat), 100);
                     if (data == null)
                     {
-                        Utils.LogInfo($"Failed to encode image for texture {assetPath} - skipping", _isLoggingEnabled);
+                        TextureFailed(assetPath, $"Failed to encode image for texture {assetPath} - skipping");
                         return;
                     }
                     using var stream = File.OpenWrite(destinationFilePath);
@@ -223,6 +233,7 @@ namespace BatchExport
             }
             catch (Exception ex)
             {
+                Failures.Record(assetPath, ex);
                 Utils.LogInfo($"Failed to export texture {assetPath}: {ex.Message}", _isLoggingEnabled);
                 if (_isLoggingEnabled)
                 {
@@ -247,6 +258,12 @@ namespace BatchExport
                     }
                 }
             }
+        }
+
+        private void TextureFailed(string assetPath, string message)
+        {
+            Failures.Record(assetPath, message);
+            Utils.LogInfo(message, _isLoggingEnabled);
         }
 
         private void ExportMaterial(UMaterialInterface material, string assetPath)
@@ -332,6 +349,7 @@ namespace BatchExport
                 _ => new UEFormatMeshFormat()
             };
 
+            MeshGeometrySlots.Wait();
             try
             {
                 // Build the files directly instead of going through ExportSession, whose
@@ -377,7 +395,12 @@ namespace BatchExport
             }
             catch (Exception ex)
             {
+                Failures.Record(assetPath, ex);
                 Utils.LogInfo($"Failed to export mesh geometry for {assetPath}: {ex.Message}", _isLoggingEnabled);
+            }
+            finally
+            {
+                MeshGeometrySlots.Release();
             }
         }
 
@@ -399,6 +422,7 @@ namespace BatchExport
             }
             catch (Exception ex)
             {
+                Failures.Record(assetPath, ex);
                 Utils.LogInfo($"Failed to export {assetPath} to JSON: {ex.Message}", _isLoggingEnabled);
             }
         }
