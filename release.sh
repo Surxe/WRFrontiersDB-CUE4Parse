@@ -1,4 +1,3 @@
-
 #!/bin/bash
 
 # WRFrontiersDB-CUE4Parse Release Script
