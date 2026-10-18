@@ -6,7 +6,9 @@ GitHub Actions builds and releases the Windows and Linux binaries.
 
 Each release package is a `.zip` containing:
 - **Self-contained executable**: no .NET runtime installation required
-- **Native libraries** (Linux only): `liboodle-data-shared.so`, `libdetex.so`, `libSkiaSharp.so`, next to the executable. They are fetched and built by `scripts/fetch-linux-natives.sh` in CI
+- **Native libraries**, next to the executable:
+  - Linux: `liboodle-data-shared.so`, `libdetex.so`, `libSkiaSharp.so`, fetched and built by `scripts/fetch-linux-natives.sh` in CI
+  - Windows: `oodle-data-shared.dll`, fetched by `scripts/fetch-windows-natives.sh` in CI (Detex is embedded in the executable, and SkiaSharp is bundled by the single-file publish). The Windows build is not fully tested
 - **Documentation**: `README.md`
 
 Asset names: `WRFrontiersDB-CUE4Parse-windows-x64.zip` and `WRFrontiersDB-CUE4Parse-linux-x64.zip`.

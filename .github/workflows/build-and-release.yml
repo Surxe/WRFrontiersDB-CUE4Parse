@@ -47,6 +47,11 @@ jobs:
       if: matrix.os == 'linux-x64'
       run: scripts/fetch-linux-natives.sh ./publish/${{ matrix.os }}
 
+    - name: Add Windows native libraries
+      if: matrix.os == 'win-x64'
+      shell: bash
+      run: scripts/fetch-windows-natives.sh ./publish/${{ matrix.os }}
+
     - name: Create archive (Windows)
       if: matrix.os == 'win-x64'
       run: |

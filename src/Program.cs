@@ -148,30 +148,26 @@ namespace BatchExport
         }
 
         /// <summary>
-        /// Loads Oodle (decompression) and Detex (BC textures). On Linux they are shipped next to
-        /// the executable and loaded by full path, so the export needs no environment setup and
-        /// never downloads anything. A missing library is an error, not a silent texture loss.
+        /// Loads Oodle (decompression) and Detex (BC textures). The release ships Oodle next to the
+        /// executable on both platforms (and Detex too on Linux), loaded by full path, so the export
+        /// needs no environment setup and never downloads anything. A missing library is an error,
+        /// not a silent texture loss. On Windows, Detex is extracted from CUE4Parse's embedded copy.
         /// </summary>
         private static void LoadNativeLibraries(ExportSettings settings)
         {
+            string oodlePath = Path.Combine(AppContext.BaseDirectory, OodleHelper.OodleFileName);
+            RequireNativeLibrary(oodlePath);
+            Utils.LogInfo($"Initializing Oodle from {oodlePath}...", settings.IsLoggingEnabled);
+            OodleHelper.Initialize(oodlePath);
+
             if (OperatingSystem.IsLinux())
             {
-                string oodlePath = Path.Combine(AppContext.BaseDirectory, OodleHelper.OodleFileName);
                 string detexPath = Path.Combine(AppContext.BaseDirectory, WrfConstants.LinuxDetexLibrary);
-                RequireNativeLibrary(oodlePath);
                 RequireNativeLibrary(detexPath);
-
-                Utils.LogInfo($"Initializing Oodle from {oodlePath}...", settings.IsLoggingEnabled);
-                OodleHelper.Initialize(oodlePath);
-
                 Utils.LogInfo($"Initializing Detex from {detexPath}...", settings.IsLoggingEnabled);
                 DetexHelper.Initialize(detexPath);
                 return;
             }
-
-            Utils.LogInfo("Initializing Oodle...", settings.IsLoggingEnabled);
-            OodleHelper.DownloadOodleDll();
-            OodleHelper.Initialize(OodleHelper.OodleFileName);
 
             Utils.LogInfo("Initializing Detex...", settings.IsLoggingEnabled);
             DetexHelper.LoadDll();
@@ -181,7 +177,7 @@ namespace BatchExport
         private static void RequireNativeLibrary(string path)
         {
             if (!File.Exists(path))
-                throw new FileNotFoundException($"Required native library is missing: {path}. The Linux release ships it next to the executable.");
+                throw new FileNotFoundException($"Required native library is missing: {path}. The release ships it next to the executable.");
         }
 
         private static bool IsMeshAsset(string assetPath)
