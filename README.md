@@ -70,7 +70,7 @@ dotnet build src/WRFrontiersDB-CUE4Parse.csproj --configuration Release
 The CUE4Parse submodule is pinned in `.gitmodules`. Run `git submodule update --init` if it is
 empty.
 
-### Linux natives
+### Native libraries
 
 On Linux the export loads three native libraries from the directory of the executable: Oodle
 (`liboodle-data-shared.so`), Detex (`libdetex.so`) and SkiaSharp (`libSkiaSharp.so`). The release
@@ -82,9 +82,17 @@ scripts/fetch-linux-natives.sh bin/Release/net10.0
 
 Detex is built from source at a pinned commit (`hglm/detex`), because CUE4Parse ships only a
 Windows build. Oodle and SkiaSharp are fetched from their release packages at pinned versions.
-The export stops with an error if a library is missing.
+
+On Windows only Oodle (`oodle-data-shared.dll`) is shipped next to the executable, fetched from
+the same pinned OodleUE release by `scripts/fetch-windows-natives.sh` (it runs in Git Bash).
+Detex is embedded in CUE4Parse and SkiaSharp is bundled by the single-file publish.
+
+The export stops with an error if Oodle (or, on Linux, any of the libraries) is missing.
+
+> **Windows is not fully tested.** The export is developed and run on Linux. The Windows build
+> compiles in CI, but bundling Oodle has not been run on a Windows machine.
 
 ## Releases
 
 Pushing a `v*.*.*` tag builds Windows and Linux binaries and attaches them to a GitHub
-release. The Linux zip includes the native libraries above. See `RELEASES.md`.
+release. Both zips include the native libraries above. See `RELEASES.md`.
