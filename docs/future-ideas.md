@@ -23,8 +23,3 @@ rule it out by accident.
   cut memory, but CUE4Parse's thread safety is unverified; that needs a spike first.
 - Check the computed worker counts on a larger machine. The per-phase estimates come from a
   laptop run.
-
-## Mesh exports
-
-- Don't export meshes twice. Scenes can point at the `.uemodel` files the asset phase already
-  wrote, instead of writing a second copy.
