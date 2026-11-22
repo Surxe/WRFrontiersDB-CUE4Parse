@@ -55,7 +55,7 @@ namespace BatchExport
                     ExportMorphTargets = false
                 };
 
-                var exporter = new AssetExporter(exporterOptions, settings.ExportOutputPath!, settings.IsLoggingEnabled);
+                var exporter = new AssetExporter(exporterOptions, settings.ExportOutputPath!, settings.IsLoggingEnabled, settings.IsBlueprintScriptEnabled);
                 exporter.ExportAsset(gameFileProvider, assetPath);
             }
             catch (Exception ex)
@@ -140,6 +140,7 @@ namespace BatchExport
                 StringComparer.Ordinal
             );
             provider.MappingsContainer = new FileUsmapTypeMappingsProvider(settings.MappingFilePath!);
+            provider.ReadScriptData = settings.IsBlueprintScriptEnabled;
             provider.Initialize();
             provider.Mount();
             provider.PostMount();
@@ -343,6 +344,8 @@ namespace BatchExport
 
             Utils.LogInfo("Setting mappings...", settings.IsLoggingEnabled);
             fileProvider.MappingsContainer = new FileUsmapTypeMappingsProvider(settings.MappingFilePath!);
+            fileProvider.ReadScriptData = settings.IsBlueprintScriptEnabled;
+            Utils.LogInfo($"Blueprint bytecode and decompiled .cpp: {(settings.IsBlueprintScriptEnabled ? "on" : "off")}", settings.IsLoggingEnabled);
 
             Utils.LogInfo("Initializing provider...", settings.IsLoggingEnabled);
             fileProvider.Initialize();

@@ -40,6 +40,9 @@ namespace BatchExport
         /// </summary>
         public static readonly string[] TextureExportExcludes = ["T_Stickers", "T_Decals"];
 
+        /// <summary>Decompiled Blueprints (pseudo C++) go here, under the export output path, mirroring the asset paths.</summary>
+        public const string BlueprintDecompiledDirectory = "blueprint-decompiled";
+
         /// <summary>Export mesh geometry for meshes (SM_, SK_, SKEL_ prefixes), not just textures.</summary>
         public const bool ExportMeshes = true;
 
