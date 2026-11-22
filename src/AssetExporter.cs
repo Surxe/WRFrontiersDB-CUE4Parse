@@ -5,6 +5,7 @@ using CUE4Parse.UE4.Assets.Exports.Material;
 using CUE4Parse.UE4.Assets.Exports.SkeletalMesh;
 using CUE4Parse.UE4.Assets.Exports.StaticMesh;
 using CUE4Parse.UE4.Assets.Exports.Texture;
+using CUE4Parse.UE4.Objects.Engine;
 using CUE4Parse_Conversion;
 using CUE4Parse_Conversion.Dto;
 using CUE4Parse_Conversion.Formats.Meshes;
@@ -25,6 +26,13 @@ namespace BatchExport
         private readonly ExporterOptions _options;
         private readonly string _outputPath;
         private readonly bool _isLoggingEnabled;
+        private readonly bool _decompileBlueprints;
+
+        /// <summary>
+        /// CUE4Parse's Blueprint decompiler keeps its state in static fields, so decompiles run one
+        /// at a time across the asset workers.
+        /// </summary>
+        private static readonly object DecompilerLock = new();
 
         /// <summary>
         /// Limits concurrent mesh geometry builds to the mesh phase's worker count, so a mesh that
@@ -32,11 +40,12 @@ namespace BatchExport
         /// </summary>
         public static SemaphoreSlim MeshGeometrySlots { get; set; } = new(1);
 
-        public AssetExporter(ExporterOptions options, string outputPath, bool isLoggingEnabled)
+        public AssetExporter(ExporterOptions options, string outputPath, bool isLoggingEnabled, bool decompileBlueprints = false)
         {
             _options = options;
             _outputPath = outputPath;
             _isLoggingEnabled = isLoggingEnabled;
+            _decompileBlueprints = decompileBlueprints;
         }
 
         /// <summary>
@@ -137,11 +146,44 @@ namespace BatchExport
 
                 // Always export JSON
                 ExportToJson(exports, assetPath);
+
+                if (_decompileBlueprints)
+                {
+                    foreach (var blueprintClass in exports.OfType<UBlueprintGeneratedClass>())
+                        DecompileBlueprint(blueprintClass, assetPath);
+                }
             }
             catch (Exception ex)
             {
                 Failures.Record(assetPath, ex);
                 Utils.LogInfo($"Failed to export asset {assetPath}: {ex.Message}", _isLoggingEnabled);
+            }
+        }
+
+        /// <summary>
+        /// Writes a Blueprint class as pseudo C++ (its variables, defaults and functions decompiled
+        /// from the Kismet bytecode) to &lt;output&gt;/blueprint-decompiled/&lt;asset&gt;.cpp, a reading
+        /// aid; the JSON stays the data. It is a separate tree so the asset tree holds only what
+        /// consumers already read (they list asset folders). A class the decompiler can't handle
+        /// is a failure like any other.
+        /// </summary>
+        private void DecompileBlueprint(UBlueprintGeneratedClass blueprintClass, string assetPath)
+        {
+            try
+            {
+                string pseudo;
+                lock (DecompilerLock)
+                {
+                    pseudo = blueprintClass.DecompileBlueprintToPseudo();
+                }
+                var destination = Path.Combine(_outputPath, WrfConstants.BlueprintDecompiledDirectory, $"{assetPath}.cpp");
+                CreateNeededDirectories(destination);
+                File.WriteAllText(destination, pseudo);
+            }
+            catch (Exception ex)
+            {
+                Failures.Record(assetPath, $"Blueprint decompile of {blueprintClass.Name} failed: {ex.Message}");
+                Utils.LogInfo($"Failed to decompile {blueprintClass.Name} from {assetPath}: {ex.Message}", _isLoggingEnabled);
             }
         }
 

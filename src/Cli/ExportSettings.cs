@@ -26,6 +26,18 @@ namespace BatchExport.Cli
         [DefaultValue(false)]
         public bool Quiet { get; set; }
 
+        [CommandOption("--no-blueprint-script")]
+        [Description("Leave Blueprint bytecode out of the JSON and write no decompiled Blueprints to blueprint-decompiled/ (both are on by default)")]
+        [DefaultValue(false)]
+        public bool NoBlueprintScript { get; set; }
+
+        /// <summary>
+        /// Blueprint functions keep their Kismet bytecode (ScriptBytecode in the JSON), and each
+        /// Blueprint class is also decompiled to pseudo C++ under blueprint-decompiled/, unless
+        /// --no-blueprint-script.
+        /// </summary>
+        public bool IsBlueprintScriptEnabled => !NoBlueprintScript;
+
         /// <summary>Per-asset progress and warnings are logged unless --quiet is given.</summary>
         public bool IsLoggingEnabled => !Quiet;
 

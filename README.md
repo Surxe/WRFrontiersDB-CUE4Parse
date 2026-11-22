@@ -19,6 +19,14 @@ One run exports everything, in phases:
 4. **Config**: the game's `.ini` files, into `<output>/map-export/config/`. The scenes refer to
    the collision profiles they define.
 
+Blueprint functions keep their Kismet bytecode: each `Function` export in the JSON has a
+`ScriptBytecode` array (CUE4Parse's `ReadScriptData`). Each Blueprint class is also decompiled to
+pseudo C++ (variables, defaults, functions) under `<output>/blueprint-decompiled/`, mirroring the
+asset paths (`.../BP_Character.cpp`). That tree is a reading aid; the JSON stays the data, and it is
+kept apart so the asset tree holds only JSON and PNG. Measured on 2026-11-05: 1,594 packages carry
+bytecode, the JSON grows by about 6 %, and 2,706 classes are decompiled. `--no-blueprint-script`
+turns both off.
+
 ## Usage
 
 ```bash
