@@ -1123,6 +1123,7 @@ namespace BatchExport
                     {
                         ["trace_flag"] = collision["trace_flag"],
                         ["default_profile"] = collision["default_profile"],
+                        ["double_sided"] = collision["double_sided"],
                         ["boxes"] = ((JArray) collision["boxes"]!).Count,
                         ["spheres"] = ((JArray) collision["spheres"]!).Count,
                         ["capsules"] = ((JArray) collision["capsules"]!).Count,
@@ -1175,6 +1176,10 @@ namespace BatchExport
                 ["trace_flag"] = PropToken(bodySetup, "CollisionTraceFlag"),
                 ["default_profile"] = defaultInstance != null && defaultInstance.TryGetValue(out FName profile, "CollisionProfileName") ? profile.Text : null,
                 ["default_instance"] = PropToken(bodySetup, "DefaultInstance"),
+                // bDoubleSidedGeometry: a complex-as-simple triangle mesh blocks sweeps from both sides;
+                // otherwise Chaos culls back faces that are not initially overlapped
+                // (ChaosInterfaceUtils.cpp SetCullsBackFaceRaycast(!bDoubleSided); FTriangleMeshSweepVisitor)
+                ["double_sided"] = bodySetup.GetOrDefault("bDoubleSidedGeometry", false),
                 ["boxes"] = boxes,
                 ["spheres"] = spheres,
                 ["capsules"] = capsules,
