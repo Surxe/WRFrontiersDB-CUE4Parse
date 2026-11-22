@@ -49,7 +49,7 @@ namespace BatchExport
     /// </summary>
     public sealed class MapExporter
     {
-        public const int SceneFormatVersion = 1;
+        public const int SceneFormatVersion = 2;
 
         // Per-object instance properties larger than this are replaced by a marker so one
         // pathological actor cannot bloat the scene; the raw level dump still has them.
@@ -126,6 +126,11 @@ namespace BatchExport
             public int ComponentCount;
             public int InstanceCount;
             public int TruncatedProps;
+            /// <summary>Binary arrays of decoded collision (landscape heightfields and meshes), written to
+            /// <see cref="CollisionFile"/> at the end of the world and referenced as {offset, count, type}.</summary>
+            public MemoryStream? CollisionData;
+            public string CollisionFile => $"{RelativeDir}/collision.bin";
+            public int LandscapeCollisionComponents;
 
             public void Warn(string message)
             {
@@ -243,6 +248,7 @@ namespace BatchExport
             }
 
             actorsWriter.Flush();
+            if (scene.CollisionData != null) WriteFile(scene.CollisionFile, scene.CollisionData.ToArray());
 
             var root = new JObject
             {
@@ -270,9 +276,11 @@ namespace BatchExport
                     ["unique_meshes"] = scene.Meshes.Count,
                     ["templates"] = scene.Templates.Count,
                     ["truncated_props"] = scene.TruncatedProps,
+                    ["landscape_collision_components"] = scene.LandscapeCollisionComponents,
                     ["warnings"] = scene.Warnings.Count
                 },
                 ["actors_file"] = "actors.jsonl",
+                ["collision_file"] = scene.CollisionData != null ? $"{scene.CollisionFile.Split('/').Last()}" : null,
                 ["levels"] = scene.Levels,
                 ["collision_response_sets"] = scene.ResponseSets,
                 ["templates"] = scene.Templates,
@@ -689,6 +697,16 @@ namespace BatchExport
             var socketName = TryEff<FName>(sceneComponent, "AttachSocketName", out var socketFName) ? socketFName.Text : null;
             if (!string.IsNullOrEmpty(socketName) && socketName != "None") json["attach_socket"] = socketName;
 
+            if (component is CookedLandscapeCollisionComponent landscapeCollision)
+            {
+                // A primitive in the engine, a scene component to CUE4Parse.
+                AddCollisionSettings(scene, json, component);
+                json["kind"] = "landscape_collision";
+                var collision = LandscapeCollisionJson(scene, actor, landscapeCollision);
+                if (collision != null) json["landscape_collision"] = collision;
+                return json;
+            }
+
             if (component is not UPrimitiveComponent)
             {
                 return json;
@@ -698,16 +716,7 @@ namespace BatchExport
             if (!Eff(component, "bVisible", true)) json["visible"] = false;
             if (Eff(component, "bHiddenInGame", false)) json["hidden_in_game"] = true;
 
-            // A missing key was not serialized anywhere in the template chain, i.e. it is the
-            // native class default.
-            var collision = new JObject();
-            AddIfSet(collision, "profile", EffStructFieldToken(component, "BodyInstance", "CollisionProfileName"));
-            AddIfSet(collision, "enabled", EffStructFieldToken(component, "BodyInstance", "CollisionEnabled"));
-            AddIfSet(collision, "object_type", EffStructFieldToken(component, "BodyInstance", "ObjectType"));
-            AddIfSet(collision, "use_default", EffToken(component, "bUseDefaultCollision"));
-            var responses = ResponseSet(scene, EffStructFieldToken(component, "BodyInstance", "CollisionResponses"));
-            if (responses >= 0) collision["responses"] = responses;
-            if (collision.Count > 0) json["collision"] = collision;
+            AddCollisionSettings(scene, json, component);
 
             switch (component)
             {
@@ -718,6 +727,8 @@ namespace BatchExport
                     json["mesh"] = meshPath;
                     var file = ExportSplineMesh(scene, visit, actor, spline);
                     if (file != null) json["model"] = file;
+                    var body = SplineBodyJson(scene, actor, spline);
+                    if (body != null) json["body"] = body;
                     break;
                 }
                 case UInstancedStaticMeshComponent instanced:
@@ -783,6 +794,161 @@ namespace BatchExport
             }
 
             return json;
+        }
+
+        /// <summary>
+        /// The component's collision settings. A missing key was not serialized anywhere in the
+        /// template chain, i.e. it is the native class default.
+        /// </summary>
+        private void AddCollisionSettings(Scene scene, JObject json, UObject component)
+        {
+            var collision = new JObject();
+            AddIfSet(collision, "profile", EffStructFieldToken(component, "BodyInstance", "CollisionProfileName"));
+            AddIfSet(collision, "enabled", EffStructFieldToken(component, "BodyInstance", "CollisionEnabled"));
+            AddIfSet(collision, "object_type", EffStructFieldToken(component, "BodyInstance", "ObjectType"));
+            AddIfSet(collision, "use_default", EffToken(component, "bUseDefaultCollision"));
+            var responses = ResponseSet(scene, EffStructFieldToken(component, "BodyInstance", "CollisionResponses"));
+            if (responses >= 0) collision["responses"] = responses;
+            if (collision.Count > 0) json["collision"] = collision;
+        }
+
+        /// <summary>Appends an array to the scene's collision.bin (4-byte aligned) and returns its reference.</summary>
+        private static JObject CollisionArray(Scene scene, ReadOnlySpan<byte> bytes, string type, int count)
+        {
+            scene.CollisionData ??= new MemoryStream();
+            var stream = scene.CollisionData;
+            while (stream.Length % 4 != 0) stream.WriteByte(0);
+            var offset = stream.Length;
+            stream.Write(bytes);
+            return new JObject { ["offset"] = offset, ["count"] = count, ["type"] = type };
+        }
+
+        private static JObject CollisionArray(Scene scene, byte[] values, string type, int count) =>
+            CollisionArray(scene, values.AsSpan(), type, count);
+
+        private static JObject CollisionArray(Scene scene, ushort[] values) =>
+            CollisionArray(scene, System.Runtime.InteropServices.MemoryMarshal.AsBytes(values.AsSpan()), "uint16", values.Length);
+
+        private static JObject CollisionArray(Scene scene, float[] values) =>
+            CollisionArray(scene, System.Runtime.InteropServices.MemoryMarshal.AsBytes(values.AsSpan()), "float32", values.Length);
+
+        private static JObject CollisionArray(Scene scene, int[] values) =>
+            CollisionArray(scene, System.Runtime.InteropServices.MemoryMarshal.AsBytes(values.AsSpan()), "int32", values.Length);
+
+        /// <summary>
+        /// A landscape collision component's cooked collision: its heightfield (grid, exact heights,
+        /// holes) or, for a mesh collision component, its triangle mesh, in the component's local space.
+        /// </summary>
+        private JObject? LandscapeCollisionJson(Scene scene, UObject actor, CookedLandscapeCollisionComponent component)
+        {
+            var collisionScale = Eff(component, "CollisionScale", 1f);
+            var json = new JObject
+            {
+                ["section_base"] = new JArray(Eff(component, "SectionBaseX", 0), Eff(component, "SectionBaseY", 0)),
+                ["collision_size_quads"] = Eff(component, "CollisionSizeQuads", 0),
+                ["collision_scale"] = collisionScale
+            };
+            if (component.CookedCollisionData is not { Length: > 0 } data)
+            {
+                scene.Fail($"{actor.Name}.{component.Name}: landscape collision has no cooked data");
+                return null;
+            }
+
+            try
+            {
+                if (component is CookedLandscapeMeshCollisionComponent)
+                {
+                    var mesh = ChaosCollision.ReadLandscapeMesh(data);
+                    json["type"] = "mesh";
+                    // x, y in collision quads, z in landscape height units ((raw - 32768) / 128).
+                    json["local_position"] = "vertex * (collision_scale, collision_scale, 1), then the component transform";
+                    json["vertices"] = CollisionArray(scene, mesh.Vertices);
+                    json["indices"] = CollisionArray(scene, mesh.Indices);
+                }
+                else
+                {
+                    var (field, hasSimple) = ChaosCollision.ReadLandscapeHeightField(data);
+                    if (hasSimple) scene.Fail($"{actor.Name}.{component.Name}: landscape has a simple collision heightfield, which is not exported");
+                    var holes = field.MaterialIndices.Count(m => m == byte.MaxValue);
+                    json["type"] = "heightfield";
+                    json["rows"] = field.Rows;
+                    json["cols"] = field.Cols;
+                    json["min_value"] = field.MinValue;
+                    json["height_per_unit"] = field.HeightPerUnit;
+                    json["local_position"] = "x = column * collision_scale, y = row * collision_scale, z = (min_value + height * height_per_unit) / 128, then the component transform";
+                    json["heights"] = CollisionArray(scene, field.Heights);
+                    json["holes"] = holes;
+                    if (holes > 0)
+                        json["cell_materials"] = CollisionArray(scene, field.MaterialIndices, "uint8", field.MaterialIndices.Length);
+                }
+                scene.LandscapeCollisionComponents++;
+                return json;
+            }
+            catch (Exception ex)
+            {
+                scene.Fail($"{actor.Name}.{component.Name}: landscape collision decode failed: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// A spline mesh's own collision body: built from its mesh's body setup at edit time, deformed
+        /// along the spline (hulls; boxes become hulls), and cooked into the level. In the component's
+        /// local space. A complex-as-simple body has no shapes but its cooked triangle mesh.
+        /// </summary>
+        private JObject? SplineBodyJson(Scene scene, UObject actor, USplineMeshComponent spline)
+        {
+            var bodySetupIndex = Eff<FPackageIndex?>(spline, "BodySetup", null);
+            if (bodySetupIndex == null || bodySetupIndex.IsNull) return null;
+            try
+            {
+                var bodySetup = bodySetupIndex.Load<UBodySetup>();
+                if (bodySetup == null) return null;
+                var body = CollisionJson(bodySetup);
+                AddTriangleMesh(body, bodySetup, message => scene.Fail($"{actor.Name}.{spline.Name}: {message}"));
+                return body;
+            }
+            catch (Exception ex)
+            {
+                scene.Fail($"{actor.Name}.{spline.Name}: spline body setup failed: {ex.Message}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// For a complex-as-simple body, its cooked triangle mesh (the triangles character sweeps hit),
+        /// as flat vertex and index lists in UE's triangle order.
+        /// </summary>
+        private static void AddTriangleMesh(JObject collision, UBodySetup bodySetup, Action<string> fail)
+        {
+            if (collision["trace_flag"]?.ToString() != "ECollisionTraceFlag::CTF_UseComplexAsSimple") return;
+            var formats = bodySetup.CookedFormatData?.Formats;
+            if (formats is not { Count: > 0 })
+            {
+                fail("complex-as-simple body has no cooked data");
+                return;
+            }
+            try
+            {
+                var data = formats.Values.First().Data;
+                if (data == null)
+                {
+                    fail("complex-as-simple body's cooked data is empty");
+                    return;
+                }
+                var mesh = ChaosCollision.ReadBodySetupTriangleMesh(data, out var meshCount);
+                if (meshCount > 1) fail($"body has {meshCount} cooked triangle meshes; only the first is exported");
+                if (mesh == null) return;
+                collision["trimesh"] = new JObject
+                {
+                    ["vertices"] = new JArray(mesh.Vertices),
+                    ["indices"] = new JArray(mesh.Indices)
+                };
+            }
+            catch (Exception ex)
+            {
+                fail($"cooked triangle mesh decode failed: {ex.Message}");
+            }
         }
 
         private JArray BrushConvexHulls(Scene scene, UObject actor, UBrushComponent brush)
@@ -951,6 +1117,7 @@ namespace BatchExport
                 if (mesh.BodySetup is { IsNull: false } bodySetupIndex && bodySetupIndex.Load<UBodySetup>() is { } bodySetup)
                 {
                     var collision = CollisionJson(bodySetup);
+                    AddTriangleMesh(collision, bodySetup, message => scene.Fail($"mesh {key}: {message}"));
                     info["collision"] = collision;
                     summary["collision"] = new JObject
                     {
@@ -1484,7 +1651,10 @@ namespace BatchExport
         /// </summary>
         private static int ResponseSet(Scene scene, JToken responses)
         {
-            if (responses is not JObject obj || obj["ResponseArray"] is not JArray array || array.Count == 0) return -1;
+            // An empty array is still a setting: cooked data stores only what differs from the archetype,
+            // so an empty ResponseArray means every channel at its default response (a landscape spline
+            // mesh over the NoCollision default of its class, for example).
+            if (responses is not JObject obj || obj["ResponseArray"] is not JArray array) return -1;
 
             var set = new JObject();
             foreach (var entry in array.OfType<JObject>())

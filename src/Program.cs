@@ -1,3 +1,4 @@
+using CUE4Parse.UE4.Assets;
 using BatchExport.Cli;
 using Spectre.Console.Cli;
 using CUE4Parse.Compression;
@@ -334,6 +335,10 @@ namespace BatchExport
 
             LoadNativeLibraries(settings);
 
+            // Landscape collision components keep their cooked collision, which CUE4Parse skips.
+            ObjectTypeRegistry.RegisterClass("LandscapeHeightfieldCollisionComponent", typeof(CookedLandscapeCollisionComponent));
+            ObjectTypeRegistry.RegisterClass("LandscapeMeshCollisionComponent", typeof(CookedLandscapeMeshCollisionComponent));
+
             Utils.LogInfo("Creating version container and file provider...", settings.IsLoggingEnabled);
             Utils.LogInfo($"Game directory: {settings.PakFilesDirectory}", settings.IsLoggingEnabled);
             Utils.LogInfo($"Mappings file: {settings.MappingFilePath}", settings.IsLoggingEnabled);
@@ -384,11 +389,13 @@ namespace BatchExport
             // Backstop for a mesh that the name prefix missed and that lands in the asset phase.
             AssetExporter.MeshGeometrySlots = new SemaphoreSlim(meshWorkers);
 
+            var phases = settings.PhaseSet;
+            Console.WriteLine($"Phases: {string.Join(", ", new[] { "assets", "meshes", "maps", "config" }.Where(phases.Contains))}");
             var timings = new List<(string Phase, int Exported, int Total, TimeSpan Time)>();
-            timings.Add(RunAssetPhase("assets", otherFiles, assetWorkers, fileProvider, settings));
-            timings.Add(RunAssetPhase("meshes", meshFiles, meshWorkers, fileProvider, settings));
-            timings.Add(RunMapPhase(fileProvider, settings));
-            timings.Add(RunConfigPhase(fileProvider, settings));
+            if (phases.Contains("assets")) timings.Add(RunAssetPhase("assets", otherFiles, assetWorkers, fileProvider, settings));
+            if (phases.Contains("meshes")) timings.Add(RunAssetPhase("meshes", meshFiles, meshWorkers, fileProvider, settings));
+            if (phases.Contains("maps")) timings.Add(RunMapPhase(fileProvider, settings));
+            if (phases.Contains("config")) timings.Add(RunConfigPhase(fileProvider, settings));
 
             foreach (var (phase, exported, total, time) in timings)
                 Console.WriteLine($"Phase {phase}: {exported}/{total} in {time:mm\\:ss}");
