@@ -267,6 +267,7 @@ one LOD, in the mesh's local space, plus the mesh's convex collision hulls.
 | `materials` | `slot` name and `material` path per material slot |
 | `sockets` | `name` and local `transform` of each socket |
 | `collision.trace_flag` | `ECollisionTraceFlag::...`; `null` is the engine default (simple shapes for simple queries, render triangles for complex ones). `CTF_UseComplexAsSimple` collides per triangle and has no shapes |
+| `collision.double_sided` | the body setup's `bDoubleSidedGeometry`. Only matters for a `CTF_UseComplexAsSimple` mesh: `false` means a sweep ignores a triangle it reaches from behind unless it starts overlapping it (Chaos culls back faces); `true` blocks from both sides |
 | `collision.default_profile`, `collision.default_instance` | The mesh's default collision body |
 | `collision.boxes` | `center`, rotation `q`, full edge lengths `size` |
 | `collision.spheres` | `center`, `radius` |
