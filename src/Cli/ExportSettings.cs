@@ -26,6 +26,15 @@ namespace BatchExport.Cli
         [DefaultValue(false)]
         public bool Quiet { get; set; }
 
+        [CommandOption("--phases <LIST>")]
+        [Description("Comma-separated phases to run, in their fixed order: assets, meshes, maps, config (default: all)")]
+        [DefaultValue("assets,meshes,maps,config")]
+        public string Phases { get; set; } = "assets,meshes,maps,config";
+
+        /// <summary>The phases to run. A partial run only rewrites what those phases write.</summary>
+        public HashSet<string> PhaseSet => Phases.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(phase => phase.ToLowerInvariant()).ToHashSet();
+
         /// <summary>Per-asset progress and warnings are logged unless --quiet is given.</summary>
         public bool IsLoggingEnabled => !Quiet;
 
@@ -41,6 +50,9 @@ namespace BatchExport.Cli
                 return ValidationResult.Error($"Pak files directory not found: {PakFilesDirectory}");
             if (!File.Exists(MappingFilePath))
                 return ValidationResult.Error($"Mappings file not found: {MappingFilePath}");
+            var unknown = PhaseSet.Except(["assets", "meshes", "maps", "config"]).ToList();
+            if (unknown.Count > 0 || PhaseSet.Count == 0)
+                return ValidationResult.Error($"--phases: unknown or empty phase list '{Phases}'");
 
             return ValidationResult.Success();
         }
