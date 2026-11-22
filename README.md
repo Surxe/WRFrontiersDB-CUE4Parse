@@ -16,6 +16,9 @@ One run exports everything, in phases:
 2. **Meshes**: static and skeletal meshes (`SM_`, `SK_`, `SKEL_`), as JSON and `.uemodel` geometry.
 3. **Maps**: every released map as a scene, into `<output>/map-export/maps/`. The map list comes
    from the game's own data (see `src/MapList.cs`). See `MAPS.md` for the format.
+   Collision the game cooks but CUE4Parse skips is decoded too (`src/ChaosCollision.cs`): the
+   landscape collision heightfields with their holes, landscape mesh collision, the triangle meshes of
+   complex-as-simple bodies, and each spline mesh's own collision body (MAPS.md, "Collision data").
 4. **Config**: the game's `.ini` files, into `<output>/map-export/config/`. The scenes refer to
    the collision profiles they define.
 
@@ -37,6 +40,9 @@ texture settings, which paths to skip, and which textures to export) is a consta
 `src/WrfConstants.cs`. Changing one of those means editing the file and rebuilding.
 
 Progress is logged to the console by default. Pass `--quiet` to turn it off.
+
+`--phases` runs a subset of the phases, for example `--phases maps,config` to re-export only the
+maps into an existing export. A partial run rewrites only what those phases write.
 
 ### Memory
 

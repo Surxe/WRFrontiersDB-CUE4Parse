@@ -47,6 +47,7 @@ default, which the game files do not contain.
     scene.json          levels, templates, mesh index, stats, warnings
     actors.jsonl        one actor per line, with its components
     landscape/*.r16     terrain height grids
+    collision.bin       decoded landscape collision arrays (see "Collision data")
     splines/*.uemodel   spline meshes, already deformed along their spline
     navmesh/*.json      navigation mesh polygons
     levels/*.json       raw level dumps (not produced in this version; see docs/future-ideas.md)
@@ -76,10 +77,11 @@ match what the game renders even under non-uniform scale.
 
 | Key | Content |
 |-----|---------|
-| `format`, `version` | `"ue-map-scene"`, `1` |
+| `format`, `version` | `"ue-map-scene"`, `2` |
 | `world`, `name` | Object path and name of the root world |
 | `mesh_geometry` | `"fallback_lod0"` or `"nanite"`: which geometry the `.uemodel` files hold |
-| `stats` | Counts of levels, actors, components, mesh instances, unique meshes, warnings |
+| `stats` | Counts of levels, actors, components, mesh instances, unique meshes, landscape collision components, warnings |
+| `collision_file` | `"collision.bin"` when the map has landscape collision, else `null` |
 | `actors_file` | `"actors.jsonl"` |
 | `levels` | The level tree, see below |
 | `collision_response_sets` | Interned custom collision responses, referenced by index from components |
@@ -147,7 +149,7 @@ actor lists in `RootComponent` or `BlueprintCreatedComponents`.
 | Key | Content |
 |-----|---------|
 | `name`, `class`, `native` | As for actors |
-| `kind` | `static_mesh`, `instanced_static_mesh`, `spline_mesh`, `brush`, `box`, `sphere`, `capsule`, `landscape_component`, `primitive` (other primitive), `scene` (transform only), `logic` (no transform), `error` (could not be exported; `error` holds the reason) |
+| `kind` | `static_mesh`, `instanced_static_mesh`, `spline_mesh`, `brush`, `box`, `sphere`, `capsule`, `landscape_component`, `landscape_collision`, `primitive` (other primitive), `scene` (transform only), `logic` (no transform), `error` (could not be exported; `error` holds the reason) |
 | `template`, `props` | As for actors |
 | `parent` | Index of the attach parent in the same actor, `null` for an unattached component |
 | `parent_path` | Instead of `parent`, when attached to a component of another actor |
@@ -158,6 +160,8 @@ actor lists in `RootComponent` or `BlueprintCreatedComponents`.
 | `mesh` | Mesh object path, a key into `meshes` (`null` when unassigned) |
 | `instances` | `instanced_static_mesh`: one `[tx,ty,tz, qx,qy,qz,qw, sx,sy,sz]` per instance, **in world space** |
 | `model` | `spline_mesh`: the deformed mesh file, in the component's local space |
+| `body` | `spline_mesh`: the component's own collision body, in its local space. Same keys as the `.meshinfo.json` "collision" block; the engine builds it from the mesh's body at edit time, deforms the hulls along the spline and turns boxes into hulls |
+| `landscape_collision` | `landscape_collision`: the cooked collision of a landscape collision component, see "Collision data" |
 | `convex` | `brush`: convex hulls as `{"vertices": [[x,y,z], ...], "indices": [...]}` (triangle list), in the component's local space |
 | `shape` | `box`: `box_extent` (half sizes); `sphere`: `sphere_radius`; `capsule`: `capsule_half_height`, `capsule_radius`. Unscaled: multiply by the world scale |
 
@@ -184,7 +188,7 @@ key means the native default of the component's class.
 | `enabled` | `ECollisionEnabled::...` |
 | `object_type` | `ECollisionChannel::...` |
 | `use_default` | `bUseDefaultCollision`: take the mesh's own default collision instead |
-| `responses` | Index into `collision_response_sets`: `{channel: "Block" \| "Overlap" \| "Ignore"}`. Only meaningful with profile `Custom`; unlisted channels keep their default response |
+| `responses` | Index into `collision_response_sets`: `{channel: "Block" \| "Overlap" \| "Ignore"}`. Only meaningful with profile `Custom`; unlisted channels keep their default response . An empty set is a serialized empty array: every channel at its default |
 
 A static mesh actor's component uses the mesh's default collision unless it says otherwise, so
 when `profile` and `enabled` are both absent the mesh's `default_profile` applies.
@@ -204,8 +208,9 @@ A landscape is exported as the height grid it is, not as triangles:
 
 A grid vertex sits at `x = origin[0] + column`, `y = origin[1] + row`,
 `z = (value - z_offset) * z_scale` in the landscape actor's local space; apply the actor's
-`world` transform (its scale is usually 100) to place it. Holes cut with a visibility layer are
-not marked.
+`world` transform (its scale is usually 100) to place it. This is the render grid: holes cut with
+a visibility layer are not marked in it. The landscape's collision, which has them and can be
+coarser, is under "Collision data".
 
 ### navmesh
 
@@ -213,6 +218,39 @@ not marked.
 `walkable_climb`) and the Recast `tiles`. Each tile has `vertices` in Unreal world space and
 `polys`: convex polygons as `{"v": [vertex indices], "area", "type", "flags"}`, where `type`
 `0` is walkable ground and `1`/`2` are off-mesh links. A map has one navmesh per agent size.
+
+## Collision data
+
+What the game collides with on the landscape is not the render height grid: it is the cooked
+Chaos collision each `LandscapeHeightfieldCollisionComponent` carries, built at the landscape's
+`CollisionMipLevel` and with its holes. CUE4Parse skips those bytes; the exporter decodes them
+(`src/ChaosCollision.cs`) and writes their arrays to `maps/<World>/collision.bin`. A component of
+kind `landscape_collision` then carries:
+
+| Key | Content |
+|-----|---------|
+| `type` | `heightfield`, or `mesh` for a `LandscapeMeshCollisionComponent` |
+| `section_base` | The component's offset in landscape grid units (already in its `world` transform) |
+| `collision_size_quads`, `collision_scale` | Cells along each side, and the size of one cell in landscape grid units. At `CollisionMipLevel` 2 a 127-quad component has 31 collision quads, 127 / 31 = 4.097 grid units each |
+| `rows`, `cols` | `heightfield`: vertices along local +Y and +X; vertex (x, y) is `heights[y * cols + x]` |
+| `heights` | `heightfield`: an array reference, `uint16` |
+| `min_value`, `height_per_unit` | `heightfield`: a height decodes to `min_value + h * height_per_unit` landscape height units (raw height minus 32768). Chaos requantises each component over its own range |
+| `holes`, `cell_materials` | `heightfield`: the number of hole cells, and when there are any, one `uint8` per cell (`(rows - 1) * (cols - 1)`, row-major) where 255 marks a hole |
+| `vertices`, `indices` | `mesh`: `float32` x, y, z per vertex (x, y in collision quads, z in landscape height units) and `int32` triangles |
+| `local_position` | The formula, in words |
+
+Place a point with the component's `world` transform: for a heightfield,
+`world = t + rotate(q, s * (x * collision_scale, y * collision_scale, (min_value + h * height_per_unit) / 128))`;
+for a mesh, `world = t + rotate(q, s * (vx * collision_scale, vy * collision_scale, vz))`. Each cell
+splits along (x, y) to (x + 1, y + 1), as Chaos does.
+
+An array reference is `{"offset", "count", "type"}`: `count` values of `type` (`uint8`, `uint16`,
+`int32`, `float32`), little-endian, starting `offset` bytes into `collision.bin`.
+
+Triangle meshes (the landscape's mesh collision, the `trimesh` of a complex-as-simple body) are in
+UE's own triangle order, the order of the render meshes and the `.uemodel` files: the outward normal
+is `(v2 - v0) x (v1 - v0)`. Chaos stores them with v0 and v1 swapped; the exporter swaps them back.
+Convex hull `indices`, as the engine stores them in the body setup, wind the other way.
 
 ## Mesh files
 
@@ -234,11 +272,13 @@ one LOD, in the mesh's local space, plus the mesh's convex collision hulls.
 | `collision.spheres` | `center`, `radius` |
 | `collision.capsules` | `center`, rotation `q`, `radius`, and `length` of the cylinder part along local Z |
 | `collision.convex` | Hulls as `vertices` and triangle `indices`, element transform already applied |
+| `collision.trimesh` | Complex-as-simple bodies only: the cooked triangle mesh character sweeps hit, as flat `vertices` (x, y, z) and `indices` lists in UE's triangle order (see "Collision data") |
 
 ## Not exported
 
 - Skeletal meshes placed in levels, decals, lights, particles and audio appear as components with
   their transform and properties, but without geometry.
 - Materials and textures.
-- Landscape holes, and the separate simplified landscape collision.
+- A separate simple landscape collision (`SimpleCollisionMipLevel`). No released map has one; a map
+  that does fails the export, so it does not go unnoticed.
 - Anything a Blueprint builds at runtime in its construction script or event graph.
